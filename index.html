@@ -464,6 +464,7 @@ window.addEventListener('load', () => {
   <button class="tab active" onclick="sw('dashboard')">📋 Painel</button>
   <button class="tab" onclick="sw('calendar')">📅 Calendário</button>
   <button class="tab" onclick="sw('chart')">📈 Evolução</button>
+  <button class="tab" onclick="sw('provas')">🏆 Provas</button>
   <button class="tab" onclick="sw('add')">➕ Novo Tema</button>
   <button class="tab" onclick="sw('history')">🗂 Histórico</button>
 </div>
@@ -544,10 +545,18 @@ window.addEventListener('load', () => {
 
 <!-- EVOLUÇÃO -->
 <div class="view" id="view-chart">
-  <div class="chart-filters" id="chartFilters"></div>
-  <div class="chart-box">
-    <canvas id="evoChart" height="280"></canvas>
+  <div class="chart-box" style="margin-bottom:1rem;">
+    <div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.05em;">📊 Aproveitamento Geral</div>
+    <canvas id="evoChart" height="220"></canvas>
     <div class="chart-empty" id="chartEmpty" style="display:none">Nenhum dado ainda. Registre revisões para ver a evolução.</div>
+  </div>
+  <div style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em;">Por Área</div>
+  <div class="chart-filters" id="chartFilters" style="margin-bottom:1rem;"></div>
+  <div id="chartAreaBox" style="display:none;">
+    <div class="chart-box">
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.05em;" id="chartAreaLabel"></div>
+      <canvas id="evoChartArea" height="220"></canvas>
+    </div>
   </div>
 </div>
 
@@ -608,6 +617,40 @@ window.addEventListener('load', () => {
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- PROVAS -->
+<div class="view" id="view-provas">
+  <div class="sec-title">🏆 Minhas Provas</div>
+  <div class="chart-box" style="margin-bottom:1rem;">
+    <div style="font-size:.85rem;font-weight:700;color:var(--txt);margin-bottom:1rem;">Registrar Prova</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.75rem;">
+      <div>
+        <label style="font-size:.65rem;font-family:'DM Mono';letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:.3rem;">Nome da Prova</label>
+        <input type="text" id="provaName" placeholder="Ex: Revalida 2025" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:.65rem;font-family:'DM Mono';letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:.3rem;">Data</label>
+        <input type="date" id="provaDate" style="width:100%;">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.75rem;margin-bottom:1rem;">
+      <div>
+        <label style="font-size:.65rem;font-family:'DM Mono';letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:.3rem;">Total de Questões</label>
+        <input type="number" id="provaTotal" min="1" placeholder="120" oninput="calcProvaPct()" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:.65rem;font-family:'DM Mono';letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:.3rem;">Acertos</label>
+        <input type="number" id="provaAcertos" min="0" placeholder="80" oninput="calcProvaPct()" style="width:100%;">
+      </div>
+      <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+        <div style="font-size:.65rem;font-family:'DM Mono';letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem;">Resultado</div>
+        <div id="provaPctPreview" style="font-size:1.4rem;font-weight:900;color:var(--muted);">—%</div>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="saveProva()" style="width:100%;">Salvar Prova</button>
+  </div>
+  <div id="provasList"></div>
 </div>
 
 <!-- HISTÓRICO -->
@@ -766,7 +809,7 @@ let history = JSON.parse(localStorage.getItem('rf2_history') || 'null') || _seed
 if (!localStorage.getItem('rf2_topics'))  localStorage.setItem('rf2_topics',  JSON.stringify(topics));
 if (!localStorage.getItem('rf2_history')) localStorage.setItem('rf2_history', JSON.stringify(history));
 let curTopicId = null, delId = null, delType = null;
-let calY, calM, chartInst = null, chartTopic = 'all';
+let calY, calM, chartTopic = 'all';
 
 // ===== ALGORITHM =====
 // rev=0 means this would be revision #1
@@ -979,6 +1022,7 @@ function addTopic() {
   document.getElementById('newTotal').value='';
   document.getElementById('newHits').value='';
   document.getElementById('newDate').value=todayISO();
+  document.getElementById('provaDate').value=todayISO();
   render(); sw('dashboard');
 }
 
@@ -1226,56 +1270,21 @@ function calPrev(){ calM--; if(calM<0){calM=11;calY--;} renderCalendar(); }
 function calNext(){ calM++; if(calM>11){calM=0;calY++;} renderCalendar(); }
 
 // ===== CHART =====
-function renderChart(){
-  const topics_with_hist = [...new Set(history.map(h=>h.topicId))].map(id=>{
-    const t=topics.find(x=>x.id===id);
-    return t?{id,name:t.name}:null;
-  }).filter(Boolean);
+let chartInstances = {};
+let chartAreaSelected = null;
 
-  const filtersEl = document.getElementById('chartFilters');
-  const allBtn = `<button class="cf-btn ${chartTopic==='all'?'active':''}" onclick="setChartTopic('all')">Todos</button>`;
-  const topicBtns = topics_with_hist.map(t=>`<button class="cf-btn ${chartTopic===t.id?'active':''}" onclick="setChartTopic('${t.id}')">${t.name}</button>`).join('');
-  filtersEl.innerHTML = allBtn + topicBtns;
-
-  let dataEntries;
-  if(chartTopic==='all'){
-    dataEntries = [...history].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  } else {
-    dataEntries = history.filter(h=>h.topicId===chartTopic).sort((a,b)=>new Date(a.date)-new Date(b.date));
-  }
-
-  const empty = document.getElementById('chartEmpty');
-  const canvas = document.getElementById('evoChart');
-
-  if(!dataEntries.length){
-    canvas.style.display='none'; empty.style.display='block';
-    return;
-  }
-  canvas.style.display='block'; empty.style.display='none';
-
-  const labels = dataEntries.map(h=>fmtDate(h.date));
-  const data   = dataEntries.map(h=>h.pct);
-  const colors = dataEntries.map(h=>{
-    const c=getPctColor(h.pct,h.revNum||1);
-    return c.replace('var(--red)','#ef4444').replace('var(--ylw)','#f59e0b').replace('var(--acc)','#3b82f6').replace('var(--grn)','#10b981').replace('var(--acc2)','#06b6d4');
-  });
-
-  if(chartInst) chartInst.destroy();
-  chartInst = new Chart(canvas, {
+function makeChartConfig(entries, color='59,130,246'){
+  return {
     type:'line',
     data:{
-      labels,
+      labels: entries.map(h=>fmtDate(h.date)),
       datasets:[{
         label:'Aproveitamento (%)',
-        data,
-        borderColor:'rgba(59,130,246,.6)',
-        backgroundColor:'rgba(59,130,246,.07)',
-        pointBackgroundColor: colors,
-        pointBorderColor: colors,
-        pointRadius:6,
-        pointHoverRadius:8,
-        tension:.3,
-        fill:true,
+        data: entries.map(h=>h.pct),
+        borderColor:`rgba(${color},.7)`,
+        backgroundColor:`rgba(${color},.07)`,
+        pointBackgroundColor: entries.map(h=>h.pct>=85?'#10b981':h.pct>=70?'#3b82f6':h.pct>=50?'#f59e0b':'#ef4444'),
+        pointRadius:6, pointHoverRadius:8, tension:.3, fill:true,
       }]
     },
     options:{
@@ -1283,26 +1292,50 @@ function renderChart(){
       plugins:{
         legend:{display:false},
         tooltip:{
-          callbacks:{
-            label:ctx=>{
-              const h=dataEntries[ctx.dataIndex];
-              return [`${h.pct}% (${h.hits}/${h.total})`,`Revisão #${h.revNum||1}`,`Próxima: ${fmtDate(h.nextReview)}`];
-            }
-          },
-          backgroundColor:'#1a2236',
-          borderColor:'#1e2d47',
-          borderWidth:1,
-          titleColor:'#e2e8f0',
-          bodyColor:'#94a3b8',
+          callbacks:{label:ctx=>{const h=entries[ctx.dataIndex];return[`${h.pct}% (${h.hits}/${h.total})`,`Revisão #${h.revNum||1}`];}},
+          backgroundColor:'#1a2236',borderColor:'#1e2d47',borderWidth:1,titleColor:'#e2e8f0',bodyColor:'#94a3b8',
         }
       },
       scales:{
         y:{min:0,max:100,grid:{color:'rgba(30,45,71,.5)'},ticks:{color:'#64748b',callback:v=>v+'%'}},
-        x:{grid:{color:'rgba(30,45,71,.5)'},ticks:{color:'#64748b',maxRotation:45}}
+        x:{grid:{color:'rgba(30,45,71,.5)'},ticks:{color:'#64748b',maxRotation:45,font:{size:10}}}
       }
     }
-  });
+  };
 }
+
+const AREA_COLORS={'🩺':'59,130,246','🔪':'239,68,68','🤰':'168,85,247','🩻':'236,72,153','🛡️':'16,185,129','👶':'245,158,11'};
+
+function renderChart(){
+  Object.values(chartInstances).forEach(c=>c&&c.destroy());
+  chartInstances={};
+
+  const all=[...history].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const canvas=document.getElementById('evoChart');
+  const empty=document.getElementById('chartEmpty');
+  if(!all.length){canvas.style.display='none';empty.style.display='block';}
+  else{canvas.style.display='block';empty.style.display='none';chartInstances['all']=new Chart(canvas,makeChartConfig(all));}
+
+  const areas=[...new Set(topics.map(t=>t.area))].filter(a=>history.some(h=>{const t=topics.find(x=>x.id===h.topicId);return t&&t.area===a;}));
+  document.getElementById('chartFilters').innerHTML=areas.map(a=>{
+    const t=topics.find(x=>x.area===a);
+    return `<button class="cf-btn ${chartAreaSelected===a?'active':''}" onclick="selectChartArea('${a}')">${a} ${t?t.areaLabel:''}</button>`;
+  }).join('');
+
+  if(chartAreaSelected){
+    const aEntries=[...history].filter(h=>{const t=topics.find(x=>x.id===h.topicId);return t&&t.area===chartAreaSelected;}).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const aLabel=topics.find(t=>t.area===chartAreaSelected)?.areaLabel||chartAreaSelected;
+    document.getElementById('chartAreaBox').style.display='block';
+    document.getElementById('chartAreaLabel').textContent=`${chartAreaSelected} ${aLabel} — Evolução`;
+    const sc=document.getElementById('evoChartArea');
+    if(chartInstances['area']) chartInstances['area'].destroy();
+    chartInstances['area']=new Chart(sc,makeChartConfig(aEntries,AREA_COLORS[chartAreaSelected]||'100,116,139'));
+  } else {
+    document.getElementById('chartAreaBox').style.display='none';
+  }
+}
+
+function selectChartArea(area){chartAreaSelected=(chartAreaSelected===area)?null:area;renderChart();}
 
 function setChartTopic(id){ chartTopic=id; renderChart(); }
 
@@ -1503,14 +1536,63 @@ function confirmReset() {
   closeReset(); render();
 }
 
+// ===== PROVAS =====
+let provas = JSON.parse(localStorage.getItem('rf2_provas') || '[]');
+function saveProvas(){ localStorage.setItem('rf2_provas', JSON.stringify(provas)); }
+function calcProvaPct(){
+  const t=parseInt(document.getElementById('provaTotal').value)||0;
+  const a=parseInt(document.getElementById('provaAcertos').value)||0;
+  const el=document.getElementById('provaPctPreview');
+  if(!t){el.textContent='—%';el.style.color='var(--muted)';return;}
+  const pct=Math.round(a/t*100);
+  el.textContent=pct+'%';
+  el.style.color=pct>=70?'#10b981':pct>=50?'#f59e0b':'#ef4444';
+}
+function saveProva(){
+  const name=document.getElementById('provaName').value.trim();
+  const date=document.getElementById('provaDate').value;
+  const total=parseInt(document.getElementById('provaTotal').value)||0;
+  const acertos=parseInt(document.getElementById('provaAcertos').value)||0;
+  if(!name||!date||!total){alert('Preencha nome, data e total de questões.');return;}
+  provas.unshift({id:'pv_'+Date.now(),name,date,total,acertos,pct:Math.round(acertos/total*100)});
+  saveProvas();
+  document.getElementById('provaName').value='';
+  document.getElementById('provaTotal').value='';
+  document.getElementById('provaAcertos').value='';
+  document.getElementById('provaPctPreview').textContent='—%';
+  document.getElementById('provaPctPreview').style.color='var(--muted)';
+  renderProvas();
+}
+function deleteProva(id){
+  if(!confirm('Apagar esta prova?'))return;
+  provas=provas.filter(p=>p.id!==id);
+  saveProvas();renderProvas();
+}
+function renderProvas(){
+  const el=document.getElementById('provasList');
+  if(!provas.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--muted);font-size:.85rem;">Nenhuma prova registrada ainda.</div>';return;}
+  el.innerHTML=provas.map(p=>{
+    const col=p.pct>=70?'#10b981':p.pct>=50?'#f59e0b':'#ef4444';
+    return `<div class="chart-box" style="margin-bottom:.75rem;display:flex;align-items:center;gap:1rem;">
+      <div style="font-size:1.6rem;font-weight:900;color:${col};min-width:60px;text-align:center;">${p.pct}%</div>
+      <div style="flex:1;">
+        <div style="font-weight:700;color:var(--txt);font-size:.95rem;">${p.name}</div>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:.2rem;">${fmtDate(p.date)} · ${p.acertos} de ${p.total} questões</div>
+      </div>
+      <button onclick="deleteProva('${p.id}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">🗑</button>
+    </div>`;
+  }).join('');
+}
+
 function sw(name){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('view-'+name).classList.add('active');
-  const idx=['dashboard','calendar','chart','add','history','acesso'].indexOf(name);
+  const idx=['dashboard','calendar','chart','provas','add','history','acesso'].indexOf(name);
   document.querySelectorAll('.tab')[idx].classList.add('active');
   if(name==='chart') renderChart();
   if(name==='calendar') renderCalendar();
+  if(name==='provas') renderProvas();
 }
 
 // ===== INIT =====
