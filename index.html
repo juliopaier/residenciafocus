@@ -211,8 +211,8 @@ header{display:flex;align-items:flex-end;justify-content:space-between;margin-bo
 .sec-title{font-size:.68rem;font-family:'DM Mono';letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:.9rem;}
 
 /* SUMMARY */
-.sum-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.85rem;margin-bottom:1.75rem;}
-@media(max-width:700px){.sum-grid{grid-template-columns:1fr 1fr;}}
+.sum-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.85rem;margin-bottom:1.75rem;}
+@media(max-width:900px){.sum-grid{grid-template-columns:1fr 1fr;}}
 .sum-card{background:var(--surf);border:1px solid var(--bdr);border-radius:14px;padding:1.1rem 1.2rem;}
 .sum-card.s-red{background:linear-gradient(135deg,rgba(239,68,68,.13),transparent);border-color:rgba(239,68,68,.35);}
 .sum-card.s-blue{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(6,182,212,.06));border-color:rgba(59,130,246,.35);}
@@ -491,6 +491,11 @@ window.addEventListener('load', () => {
       <div class="sum-lbl">Questões</div>
       <div class="sum-val" id="sQtotal" style="color:#a78bfa">0</div>
       <div class="sum-sub">respondidas</div>
+    </div>
+    <div class="sum-card" style="background:linear-gradient(135deg,rgba(245,158,11,.13),transparent);border-color:rgba(245,158,11,.35);">
+      <div class="sum-lbl">Média Geral</div>
+      <div class="sum-val" id="sAvgPct" style="color:#f59e0b">—%</div>
+      <div class="sum-sub">aproveitamento</div>
     </div>
   </div>
 
@@ -882,6 +887,14 @@ function render() {
   const totalQ = history.reduce((s,h) => s + (h.total||0), 0);
   const qEl = document.getElementById('sQtotal');
   if(qEl) qEl.textContent = totalQ >= 1000 ? (totalQ/1000).toFixed(1)+'k' : totalQ;
+  const avgEl = document.getElementById('sAvgPct');
+  if(avgEl){
+    if(history.length){
+      const avg = Math.round(history.reduce((s,h)=>s+(h.pct||0),0)/history.length);
+      avgEl.textContent = avg+'%';
+      avgEl.style.color = avg>=70?'#10b981':avg>=50?'#f59e0b':'#ef4444';
+    } else { avgEl.textContent='—%'; avgEl.style.color='#f59e0b'; }
+  }
 
   const allDue = [...overdue, ...due];
   const banner = document.getElementById('dueBanner');
